@@ -45,43 +45,6 @@ export default function ConversationTable({
     }
   };
 
-  const toggleStatus = async (id: string, currentStatus: string) => {
-    try {
-      const newStatus = currentStatus === "active" ? "paused" : "active";
-      const response = await fetch(`/api/conversations/${id}`, {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ status: newStatus }),
-      });
-      if (!response.ok) {
-        throw new Error("Failed to update conversation");
-      }
-      fetchConversations();
-    } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "Failed to update conversation"
-      );
-    }
-  };
-
-  const deleteConversation = async (id: string) => {
-    try {
-      const response = await fetch(`/api/conversations/${id}`, {
-        method: "DELETE",
-      });
-      if (!response.ok) {
-        throw new Error("Failed to delete conversation");
-      }
-      fetchConversations();
-    } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "Failed to delete conversation"
-      );
-    }
-  };
-
   const getDateRangeTitle = () => {
     const today = new Date();
     let startDate = new Date();
@@ -207,7 +170,7 @@ export default function ConversationTable({
                 Duration
               </th>
               <th className="px-6 py-3 text-center text-xs font-medium text-gray-300 uppercase tracking-wider">
-                State
+                Region
               </th>
               <th className="px-6 py-3 text-center text-xs font-medium text-gray-300 uppercase tracking-wider">
                 Country
@@ -266,49 +229,8 @@ export default function ConversationTable({
                       </svg>
                     </button>
 
-                    {/* Play/Pause Button */}
-                    <button
-                      onClick={() =>
-                        toggleStatus(conversation._id, conversation.status)
-                      }
-                      className="text-gray-400 hover:text-white transition-colors"
-                    >
-                      {conversation.status === "active" ? (
-                        <svg
-                          className="w-4 h-4"
-                          fill="none"
-                          stroke="currentColor"
-                          viewBox="0 0 24 24"
-                        >
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth={2}
-                            d="M14.828 14.828a4 4 0 01-5.656 0M9 10h1m4 0h1m-6 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-                          />
-                        </svg>
-                      ) : (
-                        <svg
-                          className="w-4 h-4"
-                          fill="none"
-                          stroke="currentColor"
-                          viewBox="0 0 24 24"
-                        >
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth={2}
-                            d="M14.828 14.828a4 4 0 01-5.656 0M9 10h1m4 0h1m-6 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-                          />
-                        </svg>
-                      )}
-                    </button>
-
-                    {/* Delete Button */}
-                    <button
-                      onClick={() => deleteConversation(conversation._id)}
-                      className="text-gray-400 hover:text-red-400 transition-colors"
-                    >
+                    {/* Three Dots Menu Button */}
+                    <button className="text-gray-400 hover:text-white transition-colors">
                       <svg
                         className="w-4 h-4"
                         fill="none"
@@ -319,7 +241,7 @@ export default function ConversationTable({
                           strokeLinecap="round"
                           strokeLinejoin="round"
                           strokeWidth={2}
-                          d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                          d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z"
                         />
                       </svg>
                     </button>
