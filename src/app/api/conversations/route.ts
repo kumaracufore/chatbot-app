@@ -1,25 +1,53 @@
 import { NextRequest, NextResponse } from 'next/server';
 import connectDB from '@/lib/mongodb';
-
-// Define the conversation schema inline for this API
-const conversationSchema = {
-  conversationId: Number,
-  totalConversation: String,
-  duration: String,
-  region: String,
-  country: String,
-  status: String,
-  createdAt: Date,
-};
+import Conversation from '@/models/Conversation';
 
 export async function GET() {
   try {
-    const db = await connectDB();
-    const collection = db.connection.db.collection('conversations');
+    await connectDB();
     
-    const conversations = await collection.find({}).sort({ createdAt: -1 }).toArray();
+    // Group conversations by sessionId using MongoDB aggregation
+    const groupedConversations = await Conversation.aggregate([
+      {
+        $sort: { createdAt: -1 }
+      },
+      {
+        $group: {
+          _id: '$sessionId',
+          sessionId: { $first: '$sessionId' },
+          conversations: { 
+            $push: {
+              conversationId: '$conversationId',
+              totalConversation: '$totalConversation',
+              duration: '$duration',
+              region: '$region',
+              country: '$country',
+              status: '$status',
+              createdAt: '$createdAt',
+              updatedAt: '$updatedAt'
+            }
+          },
+          totalConversations: { $sum: 1 },
+          latestConversation: { $first: '$createdAt' },
+          totalDuration: { $sum: { $toInt: { $substr: ['$duration', 0, -1] } } } // Assuming duration is like "5m"
+        }
+      },
+      {
+        $sort: { latestConversation: -1 }
+      },
+      {
+        $project: {
+          _id: 0,
+          sessionId: 1,
+          conversations: 1,
+          totalConversations: 1,
+          latestConversation: 1,
+          totalDuration: { $concat: [{ $toString: '$totalDuration' }, 'm'] }
+        }
+      }
+    ]);
     
-    return NextResponse.json(conversations);
+    return NextResponse.json(groupedConversations);
   } catch (error) {
     console.error('Error fetching conversations:', error);
     return NextResponse.json(
@@ -29,18 +57,17 @@ export async function GET() {
   }
 }
 
-// POST new conversation
 export async function POST(request: NextRequest) {
   try {
     await connectDB();
     const body = await request.json();
     
-    const { conversationId, totalConversation, duration, region, country, status } = body;
+    const { conversationId, sessionId, totalConversation, duration, region, country, status } = body;
     
     // Validate required fields
-    if (!conversationId || !totalConversation || !duration || !region || !country) {
+    if (!conversationId || !sessionId || !totalConversation || !duration || !region || !country) {
       return NextResponse.json(
-        { error: 'All fields are required' },
+        { error: 'All fields including sessionId are required' },
         { status: 400 }
       );
     }
@@ -56,6 +83,7 @@ export async function POST(request: NextRequest) {
     
     const conversation = new Conversation({
       conversationId,
+      sessionId,
       totalConversation,
       duration,
       region,

@@ -1,17 +1,34 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import * as XLSX from "xlsx";
 
-interface Conversation {
+// Custom scrollbar styles
+const scrollbarStyles = `
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 3px;
+  }
+  .custom-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    background: #9ca3af;
+    border-radius: 2px;
+  }
+  .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: #6b7280;
+  }
+`;
+
+interface ChatMessage {
   _id: string;
-  conversationId: number;
-  totalConversation: string;
-  duration: string;
-  region: string;
-  country: string;
-  status: "active" | "paused";
-  createdAt: string;
+  id: string;
+  session_id: string;
+  role: string;
+  content: string;
+  timestamp: string;
 }
+
 
 interface ConversationTableProps {
   dateRange?: string;
@@ -20,24 +37,38 @@ interface ConversationTableProps {
 export default function ConversationTable({
   dateRange = "Last 30 Days",
 }: ConversationTableProps) {
-  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
+  const [sessions, setSessions] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
+  const [selectedConversation, setSelectedConversation] = useState<string | null>(null);
+  const [statusMenuOpen, setStatusMenuOpen] = useState<string | null>(null);
+  const [conversationStatuses, setConversationStatuses] = useState<Record<string, string>>({});
 
   useEffect(() => {
-    fetchConversations();
+    fetchData();
   }, []);
 
-  const fetchConversations = async () => {
+  const fetchData = async () => {
     try {
       setLoading(true);
-      const response = await fetch("/api/conversations");
-      if (!response.ok) {
-        throw new Error("Failed to fetch conversations");
+      const chatHistoryResponse = await fetch("/api/chat-history");
+      if (!chatHistoryResponse.ok) throw new Error("Failed to fetch chat history");
+      const chatHistoryData = await chatHistoryResponse.json();
+      setChatHistory(chatHistoryData);
+      
+      const sessionsResponse = await fetch("/api/sessions");
+      if (!sessionsResponse.ok) throw new Error("Failed to fetch sessions");
+      const sessionsData = await sessionsResponse.json();
+      setSessions(sessionsData);
+      
+      // Fetch existing conversation statuses from database
+      const statusResponse = await fetch("/api/conversation-status");
+      if (statusResponse.ok) {
+        const statusData = await statusResponse.json();
+        setConversationStatuses(statusData);
       }
-      const data = await response.json();
-      setConversations(data);
     } catch (err) {
       setError(err instanceof Error ? err.message : "An error occurred");
     } finally {
@@ -81,9 +112,117 @@ export default function ConversationTable({
     )}`;
   };
 
-  const filteredConversations = conversations.filter((conversation) =>
-    conversation.region.toLowerCase().includes(searchTerm.toLowerCase())
+  // Group messages by session_id to create conversations
+  const groupedConversations = chatHistory.reduce((acc, message) => {
+    const sessionId = message.session_id;
+    if (!acc[sessionId]) {
+      acc[sessionId] = [];
+    }
+    acc[sessionId].push(message);
+    return acc;
+  }, {} as Record<string, ChatMessage[]>);
+
+  // Convert grouped conversations to table data, filtering out incomplete conversations
+  const conversationData = Object.entries(groupedConversations)
+    .filter(([sessionId, messages]) => {
+      // Check if conversation has both user and assistant messages
+      const hasUser = messages.some(msg => msg.role === 'user');
+      const hasAssistant = messages.some(msg => msg.role === 'assistant');
+      return hasUser && hasAssistant;
+    })
+    .map(([sessionId, messages], index) => {
+      // Sort messages by timestamp
+      const sortedMessages = messages.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+      
+      // Calculate conversation metrics
+      const totalMessages = messages.length;
+      const firstMessage = sortedMessages[0];
+      const lastMessage = sortedMessages[sortedMessages.length - 1];
+      
+      // Calculate duration
+      const startTime = new Date(firstMessage.timestamp).getTime();
+      const endTime = new Date(lastMessage.timestamp).getTime();
+      const durationMs = endTime - startTime;
+      const durationMinutes = Math.floor(durationMs / 60000);
+      const durationSeconds = Math.floor((durationMs % 60000) / 1000);
+      const formattedDuration = durationMinutes > 0 ? `${durationMinutes}m ${durationSeconds}s` : `${durationSeconds}s`;
+      
+      // Determine conversation status
+      const userMessages = sortedMessages.filter(msg => msg.role === 'user');
+      const assistantMessages = sortedMessages.filter(msg => msg.role === 'assistant');
+      
+      // Check if conversation is older than 7 days
+      const conversationAge = Date.now() - new Date(firstMessage.timestamp).getTime();
+      const sevenDaysInMs = 7 * 24 * 60 * 60 * 1000;
+      
+      let status = conversationStatuses[sessionId] || 'pending'; // Default to pending
+      
+      // Only apply auto-logic if no manual status has been set
+      if (!conversationStatuses[sessionId]) {
+        if (conversationAge > sevenDaysInMs) {
+          status = 'complete';
+        } else if (userMessages.length === 0 || assistantMessages.length === 0) {
+          status = 'incomplete';
+        }
+      } else {
+        // Use the manually set status
+        status = conversationStatuses[sessionId];
+      }
+      
+      return {
+        id: index + 1,
+        conversationId: String(index + 1).padStart(3, "0"), // Sequential format: 001, 002, etc.
+        totalConversation: `${totalMessages} messages`,
+        duration: formattedDuration,
+        region: 'Unknown', // Placeholder - can be enhanced later
+        country: 'Unknown', // Placeholder - can be enhanced later
+        sessionId: sessionId,
+        messages: sortedMessages,
+        createdAt: firstMessage.timestamp,
+        status: status
+      };
+    });
+
+  // Sort conversations by creation time (newest first)
+  const sortedConversations = conversationData.sort((a, b) => 
+    new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
   );
+
+  // Filter conversations based on search term
+  const filteredData = sortedConversations.filter((conversation) => {
+    const searchLower = searchTerm.toLowerCase();
+    return (
+      conversation.conversationId.toLowerCase().includes(searchLower) ||
+      conversation.sessionId.toLowerCase().includes(searchLower) ||
+      conversation.region.toLowerCase().includes(searchLower) ||
+      conversation.country.toLowerCase().includes(searchLower) ||
+      conversation.messages.some(msg => 
+        msg.content.toLowerCase().includes(searchLower) ||
+        msg.role.toLowerCase().includes(searchLower)
+      )
+    );
+  });
+
+  const handleExport = (conversation: any) => {
+    const messagesToExport = conversation.messages.map((msg: ChatMessage) => ({
+      Timestamp: new Date(msg.timestamp).toLocaleString(),
+      Role: msg.role,
+      Content: msg.content.replace(/<[^>]*>?/gm, ''), // Strip HTML tags from content
+    }));
+
+    const worksheet = XLSX.utils.json_to_sheet(messagesToExport);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Conversation");
+
+    // Set column widths for better readability
+    worksheet['!cols'] = [
+      { wch: 20 }, // Timestamp
+      { wch: 15 }, // Role
+      { wch: 100 }  // Content
+    ];
+
+    XLSX.writeFile(workbook, `conversation-${conversation.sessionId}.xlsx`);
+  };
 
   if (loading) {
     return (
@@ -120,7 +259,9 @@ export default function ConversationTable({
   }
 
   return (
-    <div className="bg-black border border-gray-700 rounded-lg p-6">
+    <>
+      <style dangerouslySetInnerHTML={{ __html: scrollbarStyles }} />
+      <div className="bg-black border border-gray-700 rounded-lg p-6">
       {/* Title and Search */}
       <div className="flex justify-between items-center mb-6">
         <h2 className="text-lg font-medium text-white">
@@ -129,7 +270,7 @@ export default function ConversationTable({
         <div className="relative">
           <input
             type="text"
-            placeholder="Search for location"
+            placeholder="Search conversations, messages, or session"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             className="bg-gray-900 border border-gray-700 text-white px-4 py-2 pl-10 pr-4 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-500 focus:border-transparent"
@@ -179,15 +320,21 @@ export default function ConversationTable({
                 Actions
               </th>
               <th className="px-6 py-3 text-center text-xs font-medium text-gray-300 uppercase tracking-wider">
+                Flags
+              </th>
+              <th className="px-6 py-3 text-center text-xs font-medium text-gray-300 uppercase tracking-wider">
                 Export
               </th>
             </tr>
           </thead>
           <tbody className="bg-black divide-y divide-gray-800">
-            {filteredConversations.map((conversation, index) => (
-              <tr key={conversation._id} className="hover:bg-gray-900">
+            {filteredData.map((conversation, index) => (
+              <tr 
+                key={conversation.sessionId} 
+                className="hover:bg-gray-900"
+              >
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-white text-center">
-                  {String(index + 1).padStart(3, "0")}
+                  {String(conversation.id).padStart(3, "0")}
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-white text-center">
                   {conversation.conversationId}
@@ -204,10 +351,13 @@ export default function ConversationTable({
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-white text-center">
                   {conversation.country}
                 </td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-white text-center">
+                <td className="px-6 py-4 whitespace-nowrap text-sm text-white">
                   <div className="flex items-center justify-center space-x-2">
                     {/* View Button */}
-                    <button className="text-gray-400 hover:text-white transition-colors">
+                    <button 
+                      className="text-gray-400 hover:text-white transition-colors cursor-pointer flex items-center justify-center"
+                      onClick={() => setSelectedConversation(conversation.sessionId)}
+                    >
                       <svg
                         className="w-4 h-4"
                         fill="none"
@@ -230,25 +380,115 @@ export default function ConversationTable({
                     </button>
 
                     {/* Three Dots Menu Button */}
-                    <button className="text-gray-400 hover:text-white transition-colors">
-                      <svg
-                        className="w-4 h-4"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
+                    <div className="relative">
+                      <button 
+                        className="text-gray-400 hover:text-white transition-colors cursor-pointer flex items-center justify-center"
+                        onClick={() => setStatusMenuOpen(statusMenuOpen === conversation.sessionId ? null : conversation.sessionId)}
                       >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={2}
-                          d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z"
-                        />
-                      </svg>
-                    </button>
+                        <svg
+                          className="w-4 h-4"
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z"
+                          />
+                        </svg>
+                      </button>
+                      
+                      {/* Status Selection Modal */}
+                      {statusMenuOpen === conversation.sessionId && (
+                        <div className="fixed inset-0 flex items-center justify-center z-50">
+                          <div 
+                            className="fixed inset-0"
+                            style={{ backgroundColor: '#0000001a' }}
+                            onClick={() => setStatusMenuOpen(null)}
+                          />
+                          <div className="bg-white dark:bg-gray-900 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 p-4 min-w-[200px] relative z-10">
+                            <h3 className="text-gray-900 dark:text-white font-medium mb-3">Update Status</h3>
+                            <div className="space-y-2">
+                              {['pending', 'incomplete', 'complete'].map((status) => (
+                                <button
+                                  key={status}
+                                  className={`w-full text-left px-3 py-2 text-sm rounded-md transition-all flex items-center border-2 cursor-pointer ${
+                                    conversation.status === status 
+                                      ? (status === 'complete' ? 'bg-green-100 border-green-500 text-green-800 dark:bg-green-900 dark:text-green-200' :
+                                         status === 'pending' ? 'bg-yellow-100 border-yellow-500 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200' :
+                                         'bg-red-100 border-red-500 text-red-800 dark:bg-red-900 dark:text-red-200')
+                                      : 'border-gray-200 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
+                                  }`}
+                                  onClick={async (e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    
+                                    try {
+                                      // Update database
+                                      const response = await fetch('/api/conversation-status', {
+                                        method: 'PUT',
+                                        headers: {
+                                          'Content-Type': 'application/json',
+                                        },
+                                        body: JSON.stringify({
+                                          sessionId: conversation.sessionId,
+                                          flagStatus: status,
+                                        }),
+                                      });
+                                      
+                                      if (response.ok) {
+                                        // Update local state only if database update succeeds
+                                        setConversationStatuses(prev => ({
+                                          ...prev,
+                                          [conversation.sessionId]: status
+                                        }));
+                                      } else {
+                                        console.error('Failed to update status in database');
+                                        // Could add toast notification here
+                                      }
+                                    } catch (error) {
+                                      console.error('Error updating status:', error);
+                                      // Could add toast notification here
+                                    }
+                                    
+                                    setStatusMenuOpen(null);
+                                  }}
+                                >
+                                  <span className={`inline-block w-3 h-3 rounded-full mr-3 ${
+                                    status === 'complete' ? 'bg-green-500' :
+                                    status === 'pending' ? 'bg-yellow-500' : 'bg-red-500'
+                                  }`}></span>
+                                  {status.charAt(0).toUpperCase() + status.slice(1)}
+                                  {conversation.status === status && (
+                                    <span className="ml-auto text-xs">✓</span>
+                                  )}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </td>
+                <td className="px-6 py-4 whitespace-nowrap text-sm text-center">
+                  <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                    conversation.status === 'complete' 
+                      ? 'bg-green-900 text-green-200' 
+                      : conversation.status === 'pending'
+                      ? 'bg-yellow-900 text-yellow-200'
+                      : 'bg-red-900 text-red-200'
+                  }`}>
+                    {conversation.status.toUpperCase()}
+                  </span>
+                </td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-white text-center">
-                  <button className="text-gray-400 hover:text-white transition-colors">
+                  <button 
+                    className="text-gray-400 hover:text-white transition-colors cursor-pointer"
+                    onClick={() => handleExport(conversation)}
+                  >
                     <svg
                       className="w-4 h-4"
                       fill="none"
@@ -270,7 +510,7 @@ export default function ConversationTable({
         </table>
       </div>
 
-      {filteredConversations.length === 0 && (
+      {filteredData.length === 0 && (
         <div className="text-center py-12">
           <svg
             className="mx-auto h-12 w-12 text-gray-400"
@@ -289,10 +529,103 @@ export default function ConversationTable({
             No conversations found
           </h3>
           <p className="mt-1 text-sm text-gray-500">
-            Get started by adding a new conversation.
+            Try adjusting your search criteria.
           </p>
         </div>
       )}
-    </div>
+      
+      
+      {/* Bootstrap-style Chat Modal */}
+      {selectedConversation && (
+        <div 
+          className="fixed inset-0 flex items-center justify-center z-50 p-4 backdrop-blur-sm"
+          style={{ backgroundColor: '#0000001a' }}
+          onClick={(e) => {
+            if (e.target === e.currentTarget) {
+              setSelectedConversation(null);
+            }
+          }}
+        >
+          <div className="bg-white bg-custom-grey rounded-lg w-full max-w-4xl h-4/5 max-h-[85vh] flex flex-col shadow-xl border border-gray-200 dark:border-gray-700 transform transition-all duration-200 ease-out scale-100">
+            {/* Chat Header */}
+            <div className="bg-gray-50 dark:bg-gray-800 px-6 py-4 rounded-t-lg flex items-center justify-between border-b border-gray-200 dark:border-gray-700">
+              <div>
+                <h3 className="text-gray-900 dark:text-white font-medium">Conversation {selectedConversation.substring(0, 8)}</h3>
+                {(() => {
+                  const conversationMessages = chatHistory
+                    .filter(msg => msg.session_id === selectedConversation)
+                    .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+                  
+                  if (conversationMessages.length > 0) {
+                    const startTime = new Date(conversationMessages[0].timestamp);
+                    return (
+                      <p className="text-gray-600 dark:text-gray-400 text-sm">
+                        {startTime.toLocaleDateString()} at {startTime.toLocaleTimeString([], { 
+                          hour: '2-digit', 
+                          minute: '2-digit' 
+                        })}
+                      </p>
+                    );
+                  }
+                  return null;
+                })()}
+              </div>
+              <button 
+                onClick={() => setSelectedConversation(null)}
+                className="text-gray-400 hover:text-white transition-colors"
+              >
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            
+            {/* Chat Messages */}
+            <div 
+              className="flex-1 overflow-y-auto p-6 custom-scrollbar"
+            >
+              <div className="space-y-3">
+                {(() => {
+                  const conversationMessages = chatHistory
+                    .filter(msg => msg.session_id === selectedConversation)
+                    .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+                  
+                  return conversationMessages.map((message, index) => {
+                    const isUser = message.role === 'user';
+                    
+                    return (
+                      <div key={message._id}>
+                        <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} mb-1`}>
+                          <div className={`max-w-xs lg:max-w-md px-4 py-3 rounded-2xl shadow-md ${
+                            isUser 
+                              ? 'bg-blue-500 text-white rounded-br-md' 
+                              : 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white border border-gray-200 dark:border-gray-600 rounded-bl-md'
+                          }`}>
+                            <div 
+                              className="text-sm"
+                              dangerouslySetInnerHTML={{ __html: message.content }}
+                            />
+                            <div className={`text-xs mt-1 ${
+                              isUser ? 'text-blue-100' : 'text-gray-500 dark:text-gray-400'
+                            }`}>
+                              {new Date(message.timestamp).toLocaleTimeString([], { 
+                                hour: '2-digit', 
+                                minute: '2-digit' 
+                              })}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  });
+                })()}
+              </div>
+            </div>
+            
+          </div>
+        </div>
+      )}
+      </div>
+    </>
   );
 }

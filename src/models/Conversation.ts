@@ -6,6 +6,11 @@ const conversationSchema = new mongoose.Schema({
     required: true,
     unique: true,
   },
+  sessionId: {
+    type: String,
+    required: true,
+    index: true,
+  },
   totalConversation: {
     type: String,
     required: true,
@@ -26,6 +31,11 @@ const conversationSchema = new mongoose.Schema({
     type: String,
     enum: ['active', 'paused'],
     default: 'active',
+  },
+  flagStatus: {
+    type: String,
+    enum: ['pending', 'incomplete', 'complete'],
+    default: 'pending',
   },
   createdAt: {
     type: Date,
