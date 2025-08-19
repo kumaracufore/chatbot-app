@@ -5,9 +5,10 @@ import { BsChatDots, BsChatDotsFill, BsChevronDown, BsFileText, BsGear, BsPerson
 
 interface HeaderProps {
   onDateRangeChange?: (dateRange: string) => void;
+  onExport?: () => void;
 }
 
-export default function Header({ onDateRangeChange }: HeaderProps) {
+export default function Header({ onDateRangeChange, onExport }: HeaderProps) {
   const [selectedPeriod, setSelectedPeriod] = useState("Last 30 Days");
 
   const handleDateRangeChange = (newPeriod: string) => {
@@ -59,14 +60,14 @@ export default function Header({ onDateRangeChange }: HeaderProps) {
         {/* Right Side Icons */}
         <div className="flex items-center space-x-4">
           {/* Document Icon */}
-          <button className="p-2 text-gray-400 hover:text-white transition-colors">
+          <button className="p-2 text-gray-400 hover:text-white transition-colors" onClick={onExport}>
             <BsFileText className="w-5 h-5" />
           </button>
 
           {/* Settings Icon */}
-          <button className="p-2 text-gray-400 hover:text-white transition-colors">
+          {/*<button className="p-2 text-gray-400 hover:text-white transition-colors">
             <BsGear className="w-5 h-5" />
-          </button>
+          </button>*/}
 
           {/* User Profile */}
           <div className="w-8 h-8 bg-gray-600 rounded-full flex items-center justify-center text-white font-medium text-sm overflow-hidden">

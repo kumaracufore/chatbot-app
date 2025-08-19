@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import * as XLSX from "xlsx";
+import { ChatMessage } from "@/types";
 
 // Custom scrollbar styles
 const scrollbarStyles = `
@@ -20,97 +21,29 @@ const scrollbarStyles = `
   }
 `;
 
-interface ChatMessage {
-  _id: string;
-  id: string;
-  session_id: string;
-  role: string;
-  content: string;
-  timestamp: string;
-}
-
 
 interface ConversationTableProps {
-  dateRange?: string;
+  dateRangeTitle: string;
+  chatHistory: ChatMessage[];
+  sessions: any[];
+  loading: boolean;
+  error: string | null;
+  conversationStatuses: Record<string, string>;
+  setConversationStatuses: React.Dispatch<React.SetStateAction<Record<string, string>>>;
 }
 
 export default function ConversationTable({
-  dateRange = "Last 30 Days",
+  dateRangeTitle,
+  chatHistory,
+  sessions,
+  loading,
+  error,
+  conversationStatuses,
+  setConversationStatuses,
 }: ConversationTableProps) {
-  const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
-  const [sessions, setSessions] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedConversation, setSelectedConversation] = useState<string | null>(null);
   const [statusMenuOpen, setStatusMenuOpen] = useState<string | null>(null);
-  const [conversationStatuses, setConversationStatuses] = useState<Record<string, string>>({});
-
-  useEffect(() => {
-    fetchData();
-  }, []);
-
-  const fetchData = async () => {
-    try {
-      setLoading(true);
-      const chatHistoryResponse = await fetch("/api/chat-history");
-      if (!chatHistoryResponse.ok) throw new Error("Failed to fetch chat history");
-      const chatHistoryData = await chatHistoryResponse.json();
-      setChatHistory(chatHistoryData);
-      
-      const sessionsResponse = await fetch("/api/sessions");
-      if (!sessionsResponse.ok) throw new Error("Failed to fetch sessions");
-      const sessionsData = await sessionsResponse.json();
-      setSessions(sessionsData);
-      
-      // Fetch existing conversation statuses from database
-      const statusResponse = await fetch("/api/conversation-status");
-      if (statusResponse.ok) {
-        const statusData = await statusResponse.json();
-        setConversationStatuses(statusData);
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "An error occurred");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const getDateRangeTitle = () => {
-    const today = new Date();
-    let startDate = new Date();
-
-    switch (dateRange) {
-      case "Last 7 Days":
-        startDate.setDate(today.getDate() - 7);
-        break;
-      case "Last 30 Days":
-        startDate.setDate(today.getDate() - 30);
-        break;
-      case "Last 90 Days":
-        startDate.setDate(today.getDate() - 90);
-        break;
-      case "Last Year":
-        startDate.setFullYear(today.getFullYear() - 1);
-        break;
-      default:
-        startDate.setDate(today.getDate() - 30);
-    }
-
-    const formatDate = (date: Date) => {
-      return date
-        .toLocaleDateString("en-GB", {
-          day: "2-digit",
-          month: "2-digit",
-          year: "numeric",
-        })
-        .replace(/\//g, "-");
-    };
-
-    return `Conversations From ${formatDate(startDate)} to ${formatDate(
-      today
-    )}`;
-  };
 
   // Group messages by session_id to create conversations
   const groupedConversations = chatHistory.reduce((acc, message) => {
@@ -265,7 +198,7 @@ export default function ConversationTable({
       {/* Title and Search */}
       <div className="flex justify-between items-center mb-6">
         <h2 className="text-lg font-medium text-white">
-          {getDateRangeTitle()}
+          {dateRangeTitle}
         </h2>
         <div className="relative">
           <input
@@ -317,7 +250,7 @@ export default function ConversationTable({
                 Country
               </th>
               <th className="px-6 py-3 text-center text-xs font-medium text-gray-300 uppercase tracking-wider">
-                Actions
+                View Chats
               </th>
               <th className="px-6 py-3 text-center text-xs font-medium text-gray-300 uppercase tracking-wider">
                 Flags
@@ -380,7 +313,7 @@ export default function ConversationTable({
                     </button>
 
                     {/* Three Dots Menu Button */}
-                    <div className="relative">
+                   <div className="relative">
                       <button 
                         className="text-gray-400 hover:text-white transition-colors cursor-pointer flex items-center justify-center"
                         onClick={() => setStatusMenuOpen(statusMenuOpen === conversation.sessionId ? null : conversation.sessionId)}
