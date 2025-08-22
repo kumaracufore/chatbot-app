@@ -1,7 +1,5 @@
 "use client";
 
-"use client";
-
 import { useState, useEffect } from "react";
 import * as XLSX from "xlsx";
 import Header from "@/components/Header";
@@ -123,7 +121,11 @@ export default function Home() {
 
   return (
     <div className="min-h-screen bg-black">
-      <Header onDateRangeChange={handleDateRangeChange} onExport={handleBulkExport} />
+      <Header 
+        title="Chatbot Analytics"
+        onDateRangeChange={handleDateRangeChange} 
+        onExport={handleBulkExport} 
+      />
       <main className="p-6">
                 <ConversationTable 
           dateRangeTitle={getFormattedDateRange().title}
